@@ -5,7 +5,8 @@
  * - SEARCH_METHODS - A constant array of available search method names.
  * - SearchMethod - Type that indicates the search method, derived from SEARCH_METHODS.
  * - getSearchMethods - Function to retrieve the list of available search methods.
- * - SearchNode - Interface for nodes used in the search algorithms.
+ * - SearchNode - Interface for nodes used in DFS, BFS, and standard A* search algorithms.
+ * - AStarExploreSearchNode - Interface for nodes used specifically in the astarExplore algorithm.
  * - MazeCell - Interface representing the structure of a maze cell.
  */
 
@@ -30,6 +31,13 @@ interface SearchNode {
   x: number;
   y: number;
   path: [number, number][];
+}
+
+// Interface for nodes used specifically in the astarExplore algorithm
+interface AStarExploreSearchNode {
+  x: number;
+  y: number;
+  g: number;    // cost from start to here
 }
 
 interface MazeCell {
@@ -66,6 +74,7 @@ export function findPath(
   method: SearchMethod,
   maze: MazeCell[][]
 ): [number, number][] {
+  if (!maze || maze.length === 0 || !maze[0]) return [];
   switch (method) {
     case 'DFS':
       return dfs(startX, startY, endX, endY, maze);
@@ -78,7 +87,8 @@ export function findPath(
     case 'BFS_EXPLORE':
       return bfsExplore(startX, startY, endX, endY, maze);
     case 'ASTAR_EXPLORE':
-      return astarExplore(startX, startY, endX, endY, maze);
+      const aStarResult = astarExplore(startX, startY, endX, endY, maze);
+      return aStarResult.explored; // Return the sequence of explored cells
     default:
       return [];
   }
@@ -132,7 +142,9 @@ function dfs(
       const ny = y + dy;
 
       if (nx >= 0 && nx < MAZE_WIDTH && ny >= 0 && ny < MAZE_HEIGHT && !wall(maze[y][x])) {
-        stack.push({ x: nx, y: ny, path: [...path, [nx, ny]] });
+        if (!visited.has(`${nx},${ny}`)) { // Ensure not to push already processed or to be processed from stack
+            stack.push({ x: nx, y: ny, path: [...path, [nx, ny]] });
+        }
       }
     }
   }
@@ -158,17 +170,14 @@ function bfs(
 ): [number, number][] {
   const queue: SearchNode[] = [{ x: startX, y: startY, path: [[startX, startY]] }];
   const visited = new Set<string>();
-   const MAZE_WIDTH = maze[0].length;
+  visited.add(`${startX},${startY}`); // Add start to visited immediately
+  const MAZE_WIDTH = maze[0].length;
   const MAZE_HEIGHT = maze.length;
 
   while (queue.length > 0) {
     const node = queue.shift()!;
     const { x, y, path } = node;
-    const key = `${x},${y}`;
-
-    if (visited.has(key)) continue;
-    visited.add(key);
-
+    
     if (x === endX && y === endY) {
       return path.slice(1); // Exclude the starting cell
     }
@@ -184,8 +193,10 @@ function bfs(
     for (const { dx, dy, wall } of directions) {
       const nx = x + dx;
       const ny = y + dy;
+      const neighborKey = `${nx},${ny}`;
 
-      if (nx >= 0 && nx < MAZE_WIDTH && ny >= 0 && ny < MAZE_HEIGHT && !wall(maze[y][x])) {
+      if (nx >= 0 && nx < MAZE_WIDTH && ny >= 0 && ny < MAZE_HEIGHT && !wall(maze[y][x]) && !visited.has(neighborKey)) {
+        visited.add(neighborKey);
         queue.push({ x: nx, y: ny, path: [...path, [nx, ny]] });
       }
     }
@@ -210,7 +221,7 @@ function dfsExplore(
  endY: number,
  maze: MazeCell[][]
 ): [number, number][] {
-  const stack: SearchNode[] = [{ x: startX, y: startY, path: [[startX, startY]] }];
+  const stack: { x: number; y: number }[] = [{ x: startX, y: startY }]; // path not needed for pure exploration
   const visited = new Set<string>();
   const explored: [number, number][] = [];
   const WIDTH = maze[0].length;
@@ -219,12 +230,14 @@ function dfsExplore(
   while (stack.length > 0) {
     const { x, y } = stack.pop()!;
     const key = `${x},${y}`;
- if (visited.has(key)) continue;
- visited.add(key);
- explored.push([x, y]);
+    if (visited.has(key)) continue;
+    visited.add(key);
+    explored.push([x, y]);
 
- if (x === endX && y === endY) {
- return explored.slice(1);
+    if (x === endX && y === endY) {
+        // For _EXPLORE methods, we return all explored cells up to the point the exit is found.
+        // The slice(1) removes the start node from the returned list.
+        return explored.slice(1); 
     }
 
     const DIRECTIONS: { dx: number; dy: number; wall: (cell: MazeCell) => boolean }[] = [
@@ -234,19 +247,21 @@ function dfsExplore(
       { dx: -1, dy: 0, wall: cell => cell.west }  // Left
     ];
 
+    // Push neighbors in reverse order for correct DFS exploration sequence (Up, Right, Down, Left)
     for (let i = DIRECTIONS.length - 1; i >= 0; i--) {
       const { dx, dy, wall } = DIRECTIONS[i];
-      const nx = x + dx, ny = y + dy;
- if (
- nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
- !wall(maze[y][x])
- ) {
- stack.push({ x: nx, y: ny, path: [] }); // path isn't strictly needed for exploration, but kept for SearchNode consistency
+      const nx = x + dx;
+      const ny = y + dy;
+      if (
+        nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
+        !wall(maze[y][x]) && !visited.has(`${nx},${ny}`)
+      ) {
+        stack.push({ x: nx, y: ny }); 
       }
     }
   }
 
-  return explored.slice(1);
+  return explored.slice(1); // Return all explored if exit not found
 }
 
 /**
@@ -265,38 +280,39 @@ function bfsExplore(
  endY: number,
  maze: MazeCell[][]
 ): [number, number][] {
-  const queue: SearchNode[] = [{ x: startX, y: startY, path: [[startX, startY]] }];
+  const queue: { x: number; y: number }[] = [{ x: startX, y: startY }]; // path not needed for pure exploration
   const visited = new Set<string>();
+  visited.add(`${startX},${startY}`);
   const explored: [number, number][] = [];
   const WIDTH = maze[0].length;
   const HEIGHT = maze.length;
 
   while (queue.length > 0) {
     const { x, y } = queue.shift()!;
-    const key = `${x},${y}`;
- if (visited.has(key)) continue;
- visited.add(key);
- explored.push([x, y]);
+    explored.push([x, y]);
 
- if (x === endX && y === endY) {
- return explored.slice(1);
+    if (x === endX && y === endY) {
+      return explored.slice(1);
     }
 
     const DIRECTIONS: { dx: number; dy: number; wall: (cell: MazeCell) => boolean }[] = [
       { dx: 0, dy: -1, wall: cell => cell.north }, { dx: 1, dy: 0, wall: cell => cell.east }, { dx: 0, dy: 1, wall: cell => cell.south }, { dx: -1, dy: 0, wall: cell => cell.west }
     ];
- for (const { dx, dy, wall } of DIRECTIONS) {
-      const nx = x + dx, ny = y + dy;
- if (
- nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
- !wall(maze[y][x])
- ) {
- queue.push({ x: nx, y: ny, path: [] }); // path isn't strictly needed for exploration
+    for (const { dx, dy, wall } of DIRECTIONS) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const neighborKey = `${nx},${ny}`;
+      if (
+        nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
+        !wall(maze[y][x]) && !visited.has(neighborKey)
+      ) {
+        visited.add(neighborKey);
+        queue.push({ x: nx, y: ny });
       }
     }
   }
 
- return explored.slice(1);
+ return explored.slice(1); // Return all explored if exit not found
 }
 
 /**
@@ -330,28 +346,32 @@ function astar(
   const MAZE_WIDTH = maze[0].length;
   const MAZE_HEIGHT = maze.length;
 
+  // Note: A* uses SearchNode {x, y, path} and calculates g from path.length
   const openSet: SearchNode[] = [{ x: startX, y: startY, path: [[startX, startY]] }];
-  const closedSet = new Set<string>();
+  const closedSet = new Set<string>(); // Stores "x,y" for visited nodes in the closed set
 
-  // Function to evaluate f = g + h (cost)
-  const fScore = (node: SearchNode) => node.path.length + heuristic(node.x, node.y, endX, endY);
+  // gScore stores the cost from start to a node
+  const gScore = new Map<string, number>();
+  gScore.set(`${startX},${startY}`, 0);
+
+  // fScore = gScore + heuristic
+  const fScore = (node: SearchNode) => (gScore.get(`${node.x},${node.y}`) ?? Infinity) + heuristic(node.x, node.y, endX, endY);
 
   while (openSet.length > 0) {
-    // Get the node with the lowest fScore
+    // Sort openSet by fScore to get the node with the lowest fScore
     openSet.sort((a, b) => fScore(a) - fScore(b));
-    const current = openSet.shift()!;
+    const current = openSet.shift()!; // Node with the lowest fScore
 
     const { x, y, path } = current;
     const key = `${x},${y}`;
-
-    if (closedSet.has(key)) continue;
-    closedSet.add(key);
 
     if (x === endX && y === endY) {
       return path.slice(1); // Exclude the starting cell
     }
 
-    // Explore neighbors in the order: Up, Right, Down, Left
+    closedSet.add(key); // Move current to closed set
+
+    // Explore neighbors
     const directions: { dx: number; dy: number; wall: (cell: MazeCell) => boolean }[] = [
       { dx: 0, dy: -1, wall: cell => cell.north }, // Up
       { dx: 1, dy: 0, wall: cell => cell.east },  // Right
@@ -362,82 +382,189 @@ function astar(
     for (const { dx, dy, wall } of directions) {
       const nx = x + dx;
       const ny = y + dy;
+      const neighborKey = `${nx},${ny}`;
 
       if (nx >= 0 && nx < MAZE_WIDTH && ny >= 0 && ny < MAZE_HEIGHT && !wall(maze[y][x])) {
-        const neighbor: SearchNode = { x: nx, y: ny, path: [...path, [nx, ny]] };
-        const neighborKey = `${nx},${ny}`;
-        if (closedSet.has(neighborKey)) continue;
+        if (closedSet.has(neighborKey)) {
+          continue; // Ignore neighbor if it's already evaluated
+        }
 
+        const tentativeGScore = (gScore.get(key) ?? Infinity) + 1; // Distance from start to current + 1
 
-        const existingNeighborIndex = openSet.findIndex(node => node.x === nx && node.y === ny);
-        if (existingNeighborIndex !== -1) {
-          const existingNeighbor = openSet[existingNeighborIndex];
-          if (fScore(neighbor) < fScore(existingNeighbor)) {
-            openSet.splice(existingNeighborIndex, 1, neighbor);
+        let neighborInOpenSet = openSet.find(node => node.x === nx && node.y === ny);
+
+        if (!neighborInOpenSet) { // Discover a new node
+          gScore.set(neighborKey, tentativeGScore);
+          const newPath = [...path, [nx, ny] as [number, number]];
+          openSet.push({ x: nx, y: ny, path: newPath });
+        } else if (tentativeGScore < (gScore.get(neighborKey) ?? Infinity)) {
+          // This path to neighbor is better than any previous one. Record it!
+          gScore.set(neighborKey, tentativeGScore);
+          // Update path for the existing neighbor in openSet
+                  
+          const existingNodeIndex = openSet.findIndex(node => node.x === nx && node.y === ny);
+          if (existingNodeIndex > -1) {
+            openSet[existingNodeIndex].path = [...path, [nx,ny] as [number,number]];
           }
-        } else {
-          openSet.push(neighbor);
         }
       }
     }
   }
-
   return []; // No path found
 }
 
+
 /**
- * Implements the A* Search exploration order for the maze.
+ * Implements the A* Search exploration order for the maze, returning both explored cells and the optimal path.
  * @param startX Starting column index.
  * @param startY Starting row index.
  * @param endX   Exit column index.
  * @param endY   Exit row index.
  * @param maze   2D array of MazeCell describing walls.
- * @returns       Array of [x,y] coordinates in the order they were explored, excluding the start.
+ * @returns       An object containing `explored` (Array of [x,y] coordinates in exploration order)
+ *                and `path` (Array of [x,y] coordinates for the optimal path).
+ *                Both arrays exclude the start node.
  */
 function astarExplore(
- startX: number,
- startY: number,
- endX: number,
- endY: number,
- maze: MazeCell[][]
-): [number, number][] {
-  const WIDTH = maze[0].length;
-  const HEIGHT = maze.length;
-  const openSet: SearchNode[] = [{ x: startX, y: startY, path: [[startX, startY]] }];
-  const closed = new Set<string>();
-  const explored: [number, number][] = [];
+  startX: number,
+  startY: number,
+  endX:   number,
+  endY:   number,
+  maze:   MazeCell[][]
+): {
+  explored: [number, number][];
+  path:     [number, number][];
+} {
+  const W = maze[0].length;
+  const H = maze.length;
 
-  const f = (node: SearchNode) => node.path.length + heuristic(node.x, node.y, endX, endY);
+  const openSet: AStarExploreSearchNode[] = [{ x: startX, y: startY, g: 0 }];
+  const inClosed = new Set<string>(); // Tracks nodes for which neighbors have been fully processed.
+  const explored: [number, number][] = []; // Tracks nodes in the order they are popped from openSet (visited for expansion).
+
+  // gScore stores the cost of the cheapest path from start to n currently known.
+  const gScore = new Map<string, number>();
+  gScore.set(`${startX},${startY}`, 0);
+
+  // cameFrom[n] is the node immediately preceding n on the cheapest path from start to n currently known.
+  const cameFrom = new Map<string, string>();
+
+  const f = (n: AStarExploreSearchNode) =>
+    n.g + heuristic(n.x, n.y, endX, endY);
+
+  const DIRS = [
+    { dx:  0, dy: -1, wall: (c: MazeCell) => c.north },
+    { dx:  1, dy:  0, wall: (c: MazeCell) => c.east  },
+    { dx:  0, dy:  1, wall: (c: MazeCell) => c.south },
+    { dx: -1, dy:  0, wall: (c: MazeCell) => c.west  },
+  ];
 
   while (openSet.length > 0) {
- openSet.sort((a, b) => f(a) - f(b));
-    const { x, y } = openSet.shift()!; // path is not strictly needed for exploration part here
-    const key = `${x},${y}`;
- if (closed.has(key)) continue;
- closed.add(key);
- explored.push([x, y]);
+    // 1) Choose the node in openSet having the lowest fScore[] value.
+    openSet.sort((a, b) => f(a) - f(b));
+    const current = openSet.shift()!;
+    const key = `${current.x},${current.y}`;
 
- if (x === endX && y === endY) {
- return explored.slice(1);
+    // If current is already processed (should not happen if properly managed with closed set/gScore checks for openSet)
+    // However, a simple `inClosed.has(key)` check before adding to openSet or updating gScore is typical.
+    // Here, we add to `inClosed` after popping, so this check handles re-expansion.
+    if (inClosed.has(key)) {
+        continue;
+    }
+    inClosed.add(key); // Mark as processed for expansion
+
+    // 3) Record in exploration order
+    if (current.x !== startX || current.y !== startY) { // Don't add start to explored list meant for AI pathing
+        explored.push([current.x, current.y]);
     }
 
-    const DIRECTIONS: { dx: number; dy: number; wall: (cell: MazeCell) => boolean }[] = [
-      { dx: 0, dy: -1, wall: cell => cell.north }, { dx: 1, dy: 0, wall: cell => cell.east }, { dx: 0, dy: 1, wall: cell => cell.south }, { dx: -1, dy: 0, wall: cell => cell.west }
-    ];
- for (const { dx, dy, wall } of DIRECTIONS) {
-      const nx = x + dx, ny = y + dy;
-      const neighborKey = `${nx},${ny}`;
- if ( nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT && !wall(maze[y][x]) && !closed.has(neighborKey)) {
- openSet.push({ x: nx, y: ny, path: [] }); // path isn't strictly needed for exploration
+
+    // 4) If current is the goal, we are done with exploration for pathfinding.
+    if (current.x === endX && current.y === endY) {
+      // Path reconstruction happens after loop if goal is found
+      break;
+    }
+
+    // 5) Expand neighbors
+    for (const { dx, dy, wall } of DIRS) {
+      const nx = current.x + dx;
+      const ny = current.y + dy;
+      const nkey = `${nx},${ny}`;
+
+      // Check bounds and wall
+      if (
+        nx < 0 || nx >= W ||
+        ny < 0 || ny >= H ||
+        wall(maze[current.y][current.x]) ||
+        inClosed.has(nkey) // Skip if already fully processed
+      ) {
+        continue;
+      }
+
+      const tentativeG = current.g + 1; // Assuming cost of moving to neighbor is 1
+
+      // If this path to neighbor is better than any previous one
+      if (tentativeG < (gScore.get(nkey) ?? Infinity)) {
+        cameFrom.set(nkey, key);
+        gScore.set(nkey, tentativeG);
+        
+        // Add to openSet if not already there, or update if a better path found
+        // (sorting handles priority implicitly after push; for true priority queue, would update)
+        const existingNodeInOpenSet = openSet.find(node => node.x === nx && node.y === ny);
+        if (!existingNodeInOpenSet) {
+            openSet.push({ x: nx, y: ny, g: tentativeG });
+        } else {
+            // If using a min-heap, this would be an update operation.
+            // With a sorted array, it might get re-evaluated.
+            // For simplicity with array `sort`, ensure gScore map is the source of truth for `f`
+            existingNodeInOpenSet.g = tentativeG; // Update g for resorting
+        }
       }
     }
   }
-  return explored.slice(1);
+
+  // Reconstruct the optimal path from end to start
+  const optimalPath: [number, number][] = [];
+  let curKey = `${endX},${endY}`;
+  // Check if the goal was reached (i.e., curKey is in cameFrom or is the start)
+  if (gScore.has(curKey)) { // Ensures goal was reachable
+    while (curKey && curKey !== `${startX},${startY}`) {
+        const [cx, cy] = curKey.split(',').map(Number) as [number, number];
+        optimalPath.push([cx, cy]);
+        curKey = cameFrom.get(curKey)!; // Move to the predecessor
+    }
+  }
+  optimalPath.reverse(); // Path is now from start (exclusive, if start isn't pushed) to end.
+
+  // The initial `explored.push` was inside the loop after popping.
+  // `explored.slice(1)` was used in the user's example.
+  // If startX,startY was pushed to `explored` first, then `slice(1)` is correct.
+  // My current logic for `explored` avoids adding startX,startY initially.
+
+  // Let's ensure `explored` correctly excludes the start node if that's the convention.
+  // The very first node popped is startX, startY. If it was added to `explored`, then `slice(1)` is needed.
+  // My `explored.push` is conditional: `if (current.x !== startX || current.y !== startY)`
+  // This means `explored` already excludes the start node. So, `explored.slice(1)` is not needed for `explored`.
+
+  // For `optimalPath`, it's reconstructed from `endX,endY` back to (but not including) `startX,startY`.
+  // So `optimalPath` is already `[first_step_after_start, ..., end_node]`.
+  // The user's code had `path: path.slice(1)`. This is likely not needed if reconstruction is correct.
+  // I will return `optimalPath` as is.
+
+  return {
+    explored: explored, // Already excludes start
+    path: optimalPath,  // Already excludes start
+  };
 }
+
 // Example usage (can be removed or commented out for production)
 /*
 import { findPath } from './pathfinder';
 // ...
-const path = findPath(sx, sy, ex, ey, 'BFS', maze);
-setAIPath(path);
+const path = findPath(sx, sy, ex, ey, 'BFS', maze); // Example call
+// For ASTAR_EXPLORE, if you need both:
+// const { explored, path: optimalAStarPath } = astarExplore(sx, sy, ex, ey, maze);
+// setAIPath(explored); // if AI follows exploration
+// or setAIPath(optimalAStarPath); // if AI should follow the optimal path after exploration visualization
 */
+
