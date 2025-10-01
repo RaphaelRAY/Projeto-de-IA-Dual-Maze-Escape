@@ -43,5 +43,5 @@ Visit [http://localhost:3000](http://localhost:3000) to start playing the game l
 
 ## 👥 Authors
 
-* Raphael Fernandes Raymundo — RA: 21.00334-3
-* Nicole Martins Fragnan — RA: 21.00368-8
+* Raphael Fernandes Raymundo 
+* Nicole Martins Fragnan 
